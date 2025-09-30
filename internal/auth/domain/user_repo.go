@@ -18,5 +18,5 @@ type UserRepository interface {
 
 	// Save сохраняет пользователя.
 	// Присваивает ID, если он пустой (реализация в адаптере).
-	Save(user *User) error
+	Save(ctx context.Context, user *User) error
 }
