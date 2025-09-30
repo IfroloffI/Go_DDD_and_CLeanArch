@@ -2,16 +2,42 @@ package http
 
 import (
 	"encoding/json"
-	"net/http"
+	"errors"
+	"my-app/Go_DDD_and_CLeanArch/internal/auth/domain"
 	"my-app/internal/auth/service"
+	"net/http"
 )
 
+// Handler обрабатывает HTTP-запросы.
 type Handler struct {
 	authService *service.AuthService
 }
 
 func NewHandler(authService *service.AuthService) *Handler {
 	return &Handler{authService: authService}
+}
+
+// authErrorToHTTPStatus маппит AuthError на HTTP-статус.
+func authErrorToHTTPStatus(err error) int {
+	if !domain.IsAuthError(err) {
+		return http.StatusInternalServerError
+	}
+
+	var authErr *domain.AuthError
+	if !errors.As(err, &authErr) {
+		return http.StatusInternalServerError
+	}
+
+	switch authErr.Code {
+	case domain.ErrCodeUserAlreadyExists:
+		return http.StatusConflict
+	case domain.ErrCodeInvalidCredentials, domain.ErrCodeUserNotFound:
+		return http.StatusUnauthorized
+	case domain.ErrCodeInvalidEmail, domain.ErrCodeWeakPassword:
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
@@ -24,16 +50,16 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := h.authService.Register(req.Email, req.Password)
+	ctx := r.Context()
+	userID, err := h.authService.Register(ctx, req.Email, req.Password)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		status := authErrorToHTTPStatus(err)
+		http.Error(w, err.Error(), status)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"user_id": userID,
-	})
+	json.NewEncoder(w).Encode(map[string]string{"user_id": userID})
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -46,8 +72,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.authService.Login(req.Email, req.Password); err != nil {
-		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+	ctx := r.Context()
+	if err := h.authService.Login(ctx, req.Email, req.Password); err != nil {
+		status := authErrorToHTTPStatus(err)
+		http.Error(w, err.Error(), status)
 		return
 	}
 
